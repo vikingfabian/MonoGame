@@ -1234,6 +1234,17 @@ namespace Microsoft.Xna.Framework.Graphics
             }
         }
 
+        public void DrawIndexedPrimitives_trianglelist_Unsafe(int baseVertex, int startIndex, int primitiveCount)
+        {
+            PlatformDrawIndexedPrimitives_trianglelist_unsafe(baseVertex, startIndex, primitiveCount);
+
+            unchecked
+            {
+                _graphicsMetrics._drawCount++;
+                _graphicsMetrics._primitiveCount += primitiveCount;
+            }
+        }
+
         /// <summary>
         /// Draw primitives of the specified type from the data in an array of vertices without indexing.
         /// </summary>

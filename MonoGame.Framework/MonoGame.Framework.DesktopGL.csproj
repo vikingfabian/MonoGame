@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\README.md" Pack="true" PackagePath="\"/>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <!-- NETFX reference assemblies let us target .NET Framework on Mac/Linux without Mono -->
@@ -48,6 +48,8 @@
   <!-- Song support with Vorbis, depends on OpenAL -->
   <ItemGroup>
     <PackageReference Include="NVorbis" Version="0.10.4" />
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+    <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
     <Compile Include="Platform\Media\OggStream.NVorbis.cs" />
     <Compile Include="Platform\Media\Song.NVorbis.cs" />
   </ItemGroup>

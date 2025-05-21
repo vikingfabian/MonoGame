@@ -241,6 +241,74 @@ namespace Microsoft.Xna.Framework.Graphics
             SetVertexAttributeArray(_newEnabledVertexAttributes);
         }
 
+        private void ApplyAttribs_unsafe(Shader shader, int baseVertex)
+        {
+            var programHash = ShaderProgramHash;
+            var bindingsChanged = false;
+
+            for (var slot = 0; slot < _vertexBuffers.Count; slot++)
+            {
+                var vertexBufferBinding = _vertexBuffers.Get(slot);
+                var vertexDeclaration = vertexBufferBinding.VertexBuffer.VertexDeclaration;
+                var attrInfo = vertexDeclaration.GetAttributeInfo(shader, programHash);
+
+                var vertexStride = vertexDeclaration.VertexStride;
+                var offset = (IntPtr)(vertexDeclaration.VertexStride * (baseVertex + vertexBufferBinding.VertexOffset));
+
+                if (!_attribsDirty &&
+                    slot < _activeBufferBindingInfosCount &&
+                    _bufferBindingInfos[slot].VertexOffset == offset &&
+                    ReferenceEquals(_bufferBindingInfos[slot].AttributeInfo, attrInfo) &&
+                    _bufferBindingInfos[slot].InstanceFrequency == vertexBufferBinding.InstanceFrequency &&
+                    _bufferBindingInfos[slot].Vbo == vertexBufferBinding.VertexBuffer.vbo)
+                    continue;
+
+                bindingsChanged = true;
+
+                GL.BindBuffer(BufferTarget.ArrayBuffer, vertexBufferBinding.VertexBuffer.vbo);
+                //GraphicsExtensions.CheckGLError();
+
+                // If instancing is not supported, but InstanceFrequency of the buffer is not zero, throw an exception
+                //if (!GraphicsCapabilities.SupportsInstancing && vertexBufferBinding.InstanceFrequency > 0)
+                //    throw new PlatformNotSupportedException("Instanced geometry drawing requires at least OpenGL 3.2 or GLES 3.2. Try upgrading your graphics drivers.");
+
+                foreach (var element in attrInfo.Elements)
+                {
+                    GL.VertexAttribPointer(element.AttributeLocation,
+                        element.NumberOfElements,
+                        element.VertexAttribPointerType,
+                        element.Normalized,
+                        vertexStride,
+                        (IntPtr)(offset.ToInt64() + element.Offset));
+
+                    // only set the divisor if instancing is supported
+                    if (GraphicsCapabilities.SupportsInstancing)
+                        GL.VertexAttribDivisor(element.AttributeLocation, vertexBufferBinding.InstanceFrequency);
+
+                    //GraphicsExtensions.CheckGLError();
+                }
+
+                _bufferBindingInfos[slot].VertexOffset = offset;
+                _bufferBindingInfos[slot].AttributeInfo = attrInfo;
+                _bufferBindingInfos[slot].InstanceFrequency = vertexBufferBinding.InstanceFrequency;
+                _bufferBindingInfos[slot].Vbo = vertexBufferBinding.VertexBuffer.vbo;
+            }
+
+            _attribsDirty = false;
+
+            if (bindingsChanged)
+            {
+                Array.Clear(_newEnabledVertexAttributes, 0, _newEnabledVertexAttributes.Length);
+                for (var slot = 0; slot < _vertexBuffers.Count; slot++)
+                {
+                    foreach (var element in _bufferBindingInfos[slot].AttributeInfo.Elements)
+                        _newEnabledVertexAttributes[element.AttributeLocation] = true;
+                }
+                _activeBufferBindingInfosCount = _vertexBuffers.Count;
+            }
+            SetVertexAttributeArray(_newEnabledVertexAttributes);
+        }
+
         private void PlatformSetup()
         {
             _programCache = new ShaderProgramCache(this);
@@ -1054,11 +1122,11 @@ namespace Microsoft.Xna.Framework.Graphics
 
             var shortIndices = _indexBuffer.IndexElementSize == IndexElementSize.SixteenBits;
 
-			var indexElementType = shortIndices ? DrawElementsType.UnsignedShort : DrawElementsType.UnsignedInt;
+            var indexElementType = shortIndices ? DrawElementsType.UnsignedShort : DrawElementsType.UnsignedInt;
             var indexElementSize = shortIndices ? 2 : 4;
-			var indexOffsetInBytes = (IntPtr)(startIndex * indexElementSize);
-			var indexElementCount = GetElementCountArray(primitiveType, primitiveCount);
-			var target = PrimitiveTypeGL(primitiveType);
+            var indexOffsetInBytes = (IntPtr)(startIndex * indexElementSize);
+            var indexElementCount = GetElementCountArray(primitiveType, primitiveCount);
+            var target = PrimitiveTypeGL(primitiveType);
 
             ApplyAttribs(_vertexShader, baseVertex);
 
@@ -1067,6 +1135,26 @@ namespace Microsoft.Xna.Framework.Graphics
                                      indexElementType,
                                      indexOffsetInBytes);
             GraphicsExtensions.CheckGLError();
+        }
+
+        private void PlatformDrawIndexedPrimitives_trianglelist_unsafe(int baseVertex, int startIndex, int primitiveCount)
+        {
+            ApplyState(true);
+
+            var shortIndices = _indexBuffer.IndexElementSize == IndexElementSize.SixteenBits;
+
+            var indexElementType = shortIndices ? DrawElementsType.UnsignedShort : DrawElementsType.UnsignedInt;
+            var indexElementSize = shortIndices ? 2 : 4;
+            var indexOffsetInBytes = (IntPtr)(startIndex * indexElementSize);
+            var indexElementCount = primitiveCount * 3;//GetElementCountArray(primitiveType, primitiveCount);
+            var target = GLPrimitiveType.Triangles;
+
+            ApplyAttribs_unsafe(_vertexShader, baseVertex);
+
+            GL.DrawElements(target,
+                                     indexElementCount,
+                                     indexElementType,
+                                     indexOffsetInBytes);
         }
 
         private void PlatformDrawUserPrimitives<T>(
