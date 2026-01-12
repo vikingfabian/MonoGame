@@ -141,7 +141,7 @@ namespace Microsoft.Xna.Framework
 
             try
             {
-                Debug.WriteLine("Thread blocked, waiting for action to be completed by the UI thread");
+                //Debug.WriteLine("Thread blocked, waiting for action to be completed by the UI thread");
                 resetEvent.Wait(); // we don't know how much time the operation will take, so let's wait indefinitely
             }
             finally
@@ -234,7 +234,7 @@ namespace Microsoft.Xna.Framework
                 foreach (Action queuedAction in _queuedActions)
                 {
                     queuedAction.Invoke();
-                    Debug.WriteLine("Pending action completed by the UI thread");
+                    //Debug.WriteLine("Pending action completed by the UI thread");
                 }
                 _queuedActions.Clear();
             }

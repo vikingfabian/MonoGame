@@ -273,7 +273,7 @@ internal static class Sdl
     public static int GetError(int value)
     {
         if (value < 0)
-            Debug.WriteLine(GetError());
+            Debug.WriteLine("SDL2 err: " + GetError());
 
         return value;
     }
@@ -281,7 +281,7 @@ internal static class Sdl
     public static IntPtr GetError(IntPtr pointer)
     {
         if (pointer == IntPtr.Zero)
-            Debug.WriteLine(GetError());
+            Debug.WriteLine("SDL2 err(2): " +GetError());
 
         return pointer;
     }

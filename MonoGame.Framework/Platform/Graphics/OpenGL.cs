@@ -1250,7 +1250,7 @@ namespace MonoGame.OpenGL
         static void DebugMessageCallbackHandler(int source, int type, int id, int severity, int length, IntPtr message, IntPtr userParam)
         {
             var errorMessage = Marshal.PtrToStringAnsi(message);
-            System.Diagnostics.Debug.WriteLine(errorMessage);
+            System.Diagnostics.Debug.WriteLine("OGL err: " + errorMessage);
             if (OnError != null)
                 OnError(errorMessage);
         }

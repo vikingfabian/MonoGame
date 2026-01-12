@@ -48,7 +48,7 @@ namespace Microsoft.Xna.Framework.Graphics
             if (compiled != (int)Bool.True)
             {
                 var log = GL.GetShaderInfoLog(_shaderHandle);
-                Debug.WriteLine(log);
+                //Debug.WriteLine(log);
 
                 GraphicsDevice.DisposeShader(_shaderHandle);
                 _shaderHandle = -1;

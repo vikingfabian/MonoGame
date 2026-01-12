@@ -910,9 +910,11 @@ namespace Microsoft.Xna.Framework.Graphics
         /// A new render target for the device, or <see langword="null"/>
         /// to set the device render target to the back buffer of the device.
         /// </param>
-		public void SetRenderTarget(RenderTarget2D renderTarget)
+		public RenderTarget2D SetRenderTarget(RenderTarget2D renderTarget)
 		{
-			if (renderTarget == null)
+            var prev = renderTarget;
+
+            if (renderTarget == null)
 		    {
                 SetRenderTargets(null);
 		    }
@@ -921,6 +923,8 @@ namespace Microsoft.Xna.Framework.Graphics
 				_tempRenderTargetBinding[0] = new RenderTargetBinding(renderTarget);
 				SetRenderTargets(_tempRenderTargetBinding);
 			}
+
+            return prev;
 		}
 
         /// <summary>
