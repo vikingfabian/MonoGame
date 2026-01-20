@@ -674,55 +674,46 @@ namespace Microsoft.Xna.Framework.Graphics
         /// <param name="scale">A scaling of this string.</param>
         /// <param name="effects">Modificators for drawing. Can be combined.</param>
         /// <param name="layerDepth">A depth of the layer of this string.</param>
-		public unsafe void DrawString (
-			SpriteFont spriteFont, string text, Vector2 position, Color color,
+		public unsafe void DrawString(SpriteFont spriteFont, string text, Vector2 position, Color color,
             float rotation, Vector2 origin, Vector2 scale, SpriteEffects effects, float layerDepth)
-		{
+        {
             CheckValid(spriteFont, text);
-            
+
             float sortKey = 0;
-            // set SortKey based on SpriteSortMode.
             switch (_sortMode)
             {
-                    // Comparison of Texture objects.
-                    case SpriteSortMode.Texture:
-                        sortKey = spriteFont.Texture.SortingKey;
-                        break;
-                    // Comparison of Depth
-                    case SpriteSortMode.FrontToBack:
-                        sortKey = layerDepth;
-                        break;
-                    // Comparison of Depth in reverse
-                    case SpriteSortMode.BackToFront:
-                        sortKey = -layerDepth;
-                        break;
+                case SpriteSortMode.Texture:
+                    sortKey = spriteFont.Texture.SortingKey;
+                    break;
+                case SpriteSortMode.FrontToBack:
+                    sortKey = layerDepth;
+                    break;
+                case SpriteSortMode.BackToFront:
+                    sortKey = -layerDepth;
+                    break;
             }
 
             var flipAdjustment = Vector2.Zero;
-
             var flippedVert = (effects & SpriteEffects.FlipVertically) == SpriteEffects.FlipVertically;
             var flippedHorz = (effects & SpriteEffects.FlipHorizontally) == SpriteEffects.FlipHorizontally;
 
             if (flippedVert || flippedHorz)
             {
                 Vector2 size;
-                
                 var source = new SpriteFont.CharacterSource(text);
                 spriteFont.MeasureString(ref source, out size);
-
                 if (flippedHorz)
                 {
                     origin.X *= -1;
                     flipAdjustment.X = -size.X;
                 }
-
                 if (flippedVert)
                 {
                     origin.Y *= -1;
                     flipAdjustment.Y = spriteFont.LineSpacing - size.Y;
                 }
             }
-            
+
             Matrix transformation = Matrix.Identity;
             float cos = 0, sin = 0;
             if (rotation == 0)
@@ -741,111 +732,123 @@ namespace Microsoft.Xna.Framework.Graphics
                 transformation.M21 = (flippedVert ? -scale.Y : scale.Y) * (-sin);
                 transformation.M22 = (flippedVert ? -scale.Y : scale.Y) * cos;
                 transformation.M41 = (((flipAdjustment.X - origin.X) * transformation.M11) + (flipAdjustment.Y - origin.Y) * transformation.M21) + position.X;
-                transformation.M42 = (((flipAdjustment.X - origin.X) * transformation.M12) + (flipAdjustment.Y - origin.Y) * transformation.M22) + position.Y; 
+                transformation.M42 = (((flipAdjustment.X - origin.X) * transformation.M12) + (flipAdjustment.Y - origin.Y) * transformation.M22) + position.Y;
             }
 
             var offset = Vector2.Zero;
             var firstGlyphOfLine = true;
 
+            // [Thai Fix] Variables to track alignment
+            float lastConsonantCenter = 0f;
+
             fixed (SpriteFont.Glyph* pGlyphs = spriteFont.Glyphs)
-            for (var i = 0; i < text.Length; ++i)
             {
-                var c = text[i];
-
-                if (c == '\r')
-                    continue;
-
-                if (c == '\n')
+                for (var i = 0; i < text.Length; ++i)
                 {
-                    offset.X = 0;
-                    offset.Y += spriteFont.LineSpacing;
-                    firstGlyphOfLine = true;
-                    continue;
+                    var c = text[i];
+                    if (c == '\r') continue;
+                    if (c == '\n')
+                    {
+                        offset.X = 0;
+                        offset.Y += spriteFont.LineSpacing;
+                        firstGlyphOfLine = true;
+                        continue;
+                    }
+
+                    var currentGlyphIndex = spriteFont.GetGlyphIndexOrDefault(c);
+                    var pCurrentGlyph = pGlyphs + currentGlyphIndex;
+
+                    // [Thai Fix] Detect if this char is a Thai "floating" mark
+                    // 0E31 = Mai Han-Akat, 0E34-0E3A = Vowels, 0E47-0E4E = Tones
+                    bool isThaiMark = (c == '\u0E31') ||
+                                      (c >= '\u0E34' && c <= '\u0E3A') ||
+                                      (c >= '\u0E47' && c <= '\u0E4E');
+
+                    // [Thai Fix] Modified Logic: Only apply spacing/bearing if NOT a mark
+                    if (firstGlyphOfLine)
+                    {
+                        offset.X = Math.Max(pCurrentGlyph->LeftSideBearing, 0);
+                        firstGlyphOfLine = false;
+                    }
+                    else if (!isThaiMark) // [Thai Fix] Don't add spacing for marks, they stack
+                    {
+                        offset.X += spriteFont.Spacing + pCurrentGlyph->LeftSideBearing;
+                    }
+
+                    // Create local position 'p'
+                    var p = offset;
+
+                    // [Thai Fix] Center the Mark on the previous consonant
+                    if (isThaiMark && !firstGlyphOfLine)
+                    {
+                        // We want: Center of Mark == lastConsonantCenter
+                        // So: Left Edge of Mark = lastConsonantCenter - (MarkWidth / 2)
+                        // We subtract 'Cropping.X' because it gets added back 3 lines later.
+                        p.X = (lastConsonantCenter - (pCurrentGlyph->BoundsInTexture.Width / 2f)) - pCurrentGlyph->Cropping.X;
+
+                        // Optional: Adjust Y for specific tone marks if they are too low in your font
+                        // if (c >= '\u0E48' && c <= '\u0E4B') p.Y -= 5; 
+                    }
+
+                    if (flippedHorz)
+                        p.X += pCurrentGlyph->BoundsInTexture.Width;
+                    p.X += pCurrentGlyph->Cropping.X;
+
+                    if (flippedVert)
+                        p.Y += pCurrentGlyph->BoundsInTexture.Height - spriteFont.LineSpacing;
+                    p.Y += pCurrentGlyph->Cropping.Y;
+
+                    // [Thai Fix] If this is a normal character, store its center for future marks to use
+                    if (!isThaiMark)
+                    {
+                        // The visual left edge is 'p.X' (ignoring the Cropping added just above for drawing)
+                        // We can reconstruct the visual center relative to the line start
+                        // We basically want the 'offset.X' (which is the pen position) + half the visual width.
+
+                        // Note: 'offset.X' at this point includes LeftSideBearing. 
+                        lastConsonantCenter = offset.X + (pCurrentGlyph->BoundsInTexture.Width / 2f);
+                    }
+
+                    // --- Standard Draw Setup ---
+                    Vector2.Transform(ref p, ref transformation, out p);
+                    var item = _batcher.CreateBatchItem();
+                    item.Texture = spriteFont.Texture;
+                    item.SortKey = sortKey;
+
+                    _texCoordTL.X = pCurrentGlyph->BoundsInTexture.X * spriteFont.Texture.TexelWidth;
+                    _texCoordTL.Y = pCurrentGlyph->BoundsInTexture.Y * spriteFont.Texture.TexelHeight;
+                    _texCoordBR.X = (pCurrentGlyph->BoundsInTexture.X + pCurrentGlyph->BoundsInTexture.Width) * spriteFont.Texture.TexelWidth;
+                    _texCoordBR.Y = (pCurrentGlyph->BoundsInTexture.Y + pCurrentGlyph->BoundsInTexture.Height) * spriteFont.Texture.TexelHeight;
+
+                    if ((effects & SpriteEffects.FlipVertically) != 0)
+                    {
+                        var temp = _texCoordBR.Y; _texCoordBR.Y = _texCoordTL.Y; _texCoordTL.Y = temp;
+                    }
+                    if ((effects & SpriteEffects.FlipHorizontally) != 0)
+                    {
+                        var temp = _texCoordBR.X; _texCoordBR.X = _texCoordTL.X; _texCoordTL.X = temp;
+                    }
+
+                    if (rotation == 0f)
+                    {
+                        item.Set(p.X, p.Y, pCurrentGlyph->BoundsInTexture.Width * scale.X, pCurrentGlyph->BoundsInTexture.Height * scale.Y, color, _texCoordTL, _texCoordBR, layerDepth);
+                    }
+                    else
+                    {
+                        item.Set(p.X, p.Y, 0, 0, pCurrentGlyph->BoundsInTexture.Width * scale.X, pCurrentGlyph->BoundsInTexture.Height * scale.Y, sin, cos, color, _texCoordTL, _texCoordBR, layerDepth);
+                    }
+
+                    // [Thai Fix] Only advance the cursor if it's NOT a mark.
+                    // This ensures the next letter starts right after the consonant, ignoring the mark's width.
+                    if (!isThaiMark)
+                    {
+                        offset.X += pCurrentGlyph->Width + pCurrentGlyph->RightSideBearing;
+                    }
                 }
-
-                var currentGlyphIndex = spriteFont.GetGlyphIndexOrDefault(c);
-                var pCurrentGlyph = pGlyphs + currentGlyphIndex;
-
-                // The first character on a line might have a negative left side bearing.
-                // In this scenario, SpriteBatch/SpriteFont normally offset the text to the right,
-                //  so that text does not hang off the left side of its rectangle.
-                if (firstGlyphOfLine)
-                {
-                    offset.X = Math.Max(pCurrentGlyph->LeftSideBearing, 0);
-                    firstGlyphOfLine = false;
-                }
-                else
-                {
-                    offset.X += spriteFont.Spacing + pCurrentGlyph->LeftSideBearing;
-                }
-
-                var p = offset;
-
-                if (flippedHorz)
-                    p.X += pCurrentGlyph->BoundsInTexture.Width;
-                p.X += pCurrentGlyph->Cropping.X;
-
-                if (flippedVert)
-                    p.Y += pCurrentGlyph->BoundsInTexture.Height - spriteFont.LineSpacing;
-                p.Y += pCurrentGlyph->Cropping.Y;
-
-                Vector2.Transform(ref p, ref transformation, out p);
-
-                var item = _batcher.CreateBatchItem();               
-                item.Texture = spriteFont.Texture;
-                item.SortKey = sortKey;
-                
-                _texCoordTL.X = pCurrentGlyph->BoundsInTexture.X * spriteFont.Texture.TexelWidth;
-                _texCoordTL.Y = pCurrentGlyph->BoundsInTexture.Y * spriteFont.Texture.TexelHeight;
-                _texCoordBR.X = (pCurrentGlyph->BoundsInTexture.X + pCurrentGlyph->BoundsInTexture.Width) * spriteFont.Texture.TexelWidth;
-                _texCoordBR.Y = (pCurrentGlyph->BoundsInTexture.Y + pCurrentGlyph->BoundsInTexture.Height) * spriteFont.Texture.TexelHeight;
-                            
-                if ((effects & SpriteEffects.FlipVertically) != 0)
-                {
-                    var temp = _texCoordBR.Y;
-				    _texCoordBR.Y = _texCoordTL.Y;
-				    _texCoordTL.Y = temp;
-			    }
-                if ((effects & SpriteEffects.FlipHorizontally) != 0)
-                {
-                    var temp = _texCoordBR.X;
-				    _texCoordBR.X = _texCoordTL.X;
-				    _texCoordTL.X = temp;
-			    }
-
-                if (rotation == 0f)
-                {
-                    item.Set(p.X,
-                            p.Y,
-                            pCurrentGlyph->BoundsInTexture.Width * scale.X,
-                            pCurrentGlyph->BoundsInTexture.Height * scale.Y,
-                            color,
-                            _texCoordTL,
-                            _texCoordBR,
-                            layerDepth);
-                }
-                else
-                {
-                    item.Set(p.X,
-                            p.Y,
-                            0,
-                            0,
-                            pCurrentGlyph->BoundsInTexture.Width * scale.X,
-                            pCurrentGlyph->BoundsInTexture.Height * scale.Y,
-                            sin,
-                            cos,
-                            color,
-                            _texCoordTL,
-                            _texCoordBR,
-                            layerDepth);
-                }
-                
-                offset.X += pCurrentGlyph->Width + pCurrentGlyph->RightSideBearing;
             }
 
-			// We need to flush if we're using Immediate sort mode.
-			FlushIfNeeded();
-		}
+            FlushIfNeeded();
+        }
 
         /// <summary>
         /// Submit a text string of sprites for drawing in the current batch.
