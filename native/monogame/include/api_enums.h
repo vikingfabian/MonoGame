@@ -1,4 +1,4 @@
-// MonoGame - Copyright (C) The MonoGame Team
+// MonoGame - Copyright (C) MonoGame Foundation, Inc
 // This file is subject to the terms and conditions defined in
 // file 'LICENSE.txt', which is part of this source code package.
 
@@ -68,6 +68,11 @@ enum class MGSurfaceFormat : mgint
     Rgba8Etc2 = 94,
     SRgb8A8Etc2 = 95,
     Astc4X4Rgba = 96,
+    Astc5X5Rgba = 97,
+    Astc6X6Rgba = 98,
+    Astc8X8Rgba = 99,
+    Astc10X10Rgba = 100,
+    Astc12X12Rgba = 101,
 };
 
 enum class MGDepthFormat : mgint
@@ -228,6 +233,23 @@ enum class MGRenderTargetUsage : mgint
     PlatformContents = 2,
 };
 
+enum class MGVertexElementUsage : mgint
+{
+    Position = 0,
+    Color = 1,
+    TextureCoordinate = 2,
+    Normal = 3,
+    Binormal = 4,
+    Tangent = 5,
+    BlendIndices = 6,
+    BlendWeight = 7,
+    Depth = 8,
+    Fog = 9,
+    PointSize = 10,
+    Sample = 11,
+    TessellateFactor = 12,
+};
+
 enum class MGVertexElementFormat : mgint
 {
     Single = 0,
@@ -242,6 +264,11 @@ enum class MGVertexElementFormat : mgint
     NormalizedShort4 = 9,
     HalfVector2 = 10,
     HalfVector4 = 11,
+};
+
+enum class MGProcessorType : mguint
+{
+    ZeroTransparentPixels = 1,
 };
 
 enum class MGGameRunBehavior : mgint
@@ -488,7 +515,7 @@ enum class MGMonoGamePlatform : mgint
     Windows = 4,
     WebGL = 5,
     XboxOne = 6,
-    WindowsGDK = 7,
+    WindowsDX12 = 7,
     XboxSeries = 8,
     PlayStation4 = 9,
     PlayStation5 = 10,

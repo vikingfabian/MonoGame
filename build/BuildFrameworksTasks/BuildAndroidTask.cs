@@ -2,6 +2,7 @@
 namespace BuildScripts;
 
 [TaskName("Build Android")]
+[IsDependentOn(typeof(BuildShadersOGLTask))]
 public sealed class BuildAndroidTask : FrostingTask<BuildContext>
 {
     public override bool ShouldRun(BuildContext context) => context.IsWorkloadInstalled("android");
@@ -9,7 +10,11 @@ public sealed class BuildAndroidTask : FrostingTask<BuildContext>
     public override void Run(BuildContext context)
     {
         var arguments = new DotNetMSBuildSettings();
-        arguments.WithProperty("AndroidSdkDirectory", System.Environment.GetEnvironmentVariable ("ANDROID_HOME"));
+        var androidHome = Environment.GetEnvironmentVariable("ANDROID_HOME");
+        if (!string.IsNullOrWhiteSpace(androidHome))
+        {
+            arguments.WithProperty("AndroidSdkDirectory", androidHome);
+        }
         arguments.WithProperty("AcceptAndroidSDKLicenses", "true");
         arguments.WithTarget("InstallAndroidDependencies");
         var installSettings = new DotNetBuildSettings
@@ -18,6 +23,7 @@ public sealed class BuildAndroidTask : FrostingTask<BuildContext>
             Verbosity = DotNetVerbosity.Minimal,
             Configuration = context.DotNetPackSettings.Configuration,
         };
+
         context.DotNetBuild(context.GetProjectPath(ProjectType.Framework, "Android"), installSettings);
         context.DotNetPack(context.GetProjectPath(ProjectType.Framework, "Android"), context.DotNetPackSettings);
     }

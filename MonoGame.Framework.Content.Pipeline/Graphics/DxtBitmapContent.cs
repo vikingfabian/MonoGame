@@ -2,46 +2,31 @@
 // This file is subject to the terms and conditions defined in
 // file 'LICENSE.txt', which is part of this source code package.
 
-using System;
 using BCnEncoder.Shared;
 using Microsoft.Xna.Framework.Content.Pipeline.Utilities;
 using Microsoft.Xna.Framework.Graphics;
-
 
 namespace Microsoft.Xna.Framework.Content.Pipeline.Graphics
 {
     public abstract class DxtBitmapContent : BitmapContent
     {
-        private byte[] _bitmapData;
-        private int _blockSize;
-        private SurfaceFormat _format;
-
-        private int _nvttWriteOffset;
+        private byte[] _bitmapData = [];
 
         protected DxtBitmapContent(int blockSize)
         {
-            if (!((blockSize == 8) || (blockSize == 16)))
+            if (blockSize is not (8 or 16))
                 throw new ArgumentException("Invalid block size");
-            _blockSize = blockSize;
-            TryGetFormat(out _format);
         }
 
-        protected DxtBitmapContent(int blockSize, int width, int height)
-            : this(blockSize)
+        protected DxtBitmapContent(int blockSize, int width, int height) : this(blockSize)
         {
             Width = width;
             Height = height;
         }
 
-        public override byte[] GetPixelData()
-        {
-            return _bitmapData;
-        }
+        public override byte[] GetPixelData() => _bitmapData;
 
-        public override void SetPixelData(byte[] sourceData)
-        {
-            _bitmapData = sourceData;
-        }
+        public override void SetPixelData(byte[] sourceData) => _bitmapData = sourceData;
 
         private static void HasAnyAlpha(byte[] data, out bool hasTransparency)
         {
@@ -60,12 +45,10 @@ namespace Microsoft.Xna.Framework.Content.Pipeline.Graphics
 
         protected override bool TryCopyFrom(BitmapContent sourceBitmap, Rectangle sourceRegion, Rectangle destinationRegion)
         {
-            SurfaceFormat sourceFormat;
-            if (!sourceBitmap.TryGetFormat(out sourceFormat))
+            if (!sourceBitmap.TryGetFormat(out var sourceFormat))
                 return false;
 
-            SurfaceFormat format;
-            TryGetFormat(out format);
+            TryGetFormat(out var format);
 
             // A shortcut for copying the entire bitmap to another bitmap of the same type and format
             if (format == sourceFormat && (sourceRegion == new Rectangle(0, 0, Width, Height)) && sourceRegion == destinationRegion)
@@ -82,11 +65,11 @@ namespace Microsoft.Xna.Framework.Content.Pipeline.Graphics
                 return false;
 
             // If the source is not Vector4 or requires resizing, send it through BitmapContent.Copy
-            if (!(sourceBitmap is PixelBitmapContent<Vector4>) || sourceRegion.Width != destinationRegion.Width || sourceRegion.Height != destinationRegion.Height)
+            if (sourceBitmap is not PixelBitmapContent<Vector4> || sourceRegion.Width != destinationRegion.Width || sourceRegion.Height != destinationRegion.Height)
             {
                 try
                 {
-                    BitmapContent.Copy(sourceBitmap, sourceRegion, this, destinationRegion);
+                    Copy(sourceBitmap, sourceRegion, this, destinationRegion);
                     return true;
                 }
                 catch (InvalidOperationException)
@@ -96,11 +79,11 @@ namespace Microsoft.Xna.Framework.Content.Pipeline.Graphics
             }
 
             var colorBitmap = new PixelBitmapContent<Color>(sourceBitmap.Width, sourceBitmap.Height);
-            BitmapContent.Copy(sourceBitmap, colorBitmap);
+            Copy(sourceBitmap, colorBitmap);
             var sourceData = colorBitmap.GetPixelData();
 
             HasAnyAlpha(sourceData, out var hasTransparency);
-            byte[] compressedBytes = null;
+            byte[]? compressedBytes = null;
             switch (format)
             {
                 case SurfaceFormat.Dxt1 when hasTransparency:
@@ -123,7 +106,7 @@ namespace Microsoft.Xna.Framework.Content.Pipeline.Graphics
                 case SurfaceFormat.Dxt3:
                     // the bcnEncoder does not perform well enough encoding BC2/DXT3
                     //  specifically, the alpha channel seems to be off. Maybe it has something to do with the premult?
-                    Crunch.EncodeBytes(
+                    CrunchHelpers.EncodeBytes(
                         sourceBitmap: sourceBitmap,
                         crunchFormat: CrunchFormat.Dxt3,
                         out compressedBytes);
@@ -146,12 +129,10 @@ namespace Microsoft.Xna.Framework.Content.Pipeline.Graphics
 
         protected override bool TryCopyTo(BitmapContent destinationBitmap, Rectangle sourceRegion, Rectangle destinationRegion)
         {
-            SurfaceFormat destinationFormat;
-            if (!destinationBitmap.TryGetFormat(out destinationFormat))
+            if (!destinationBitmap.TryGetFormat(out var destinationFormat))
                 return false;
 
-            SurfaceFormat format;
-            TryGetFormat(out format);
+            TryGetFormat(out var format);
 
             // A shortcut for copying the entire bitmap to another bitmap of the same type and format
             var fullRegion = new Rectangle(0, 0, Width, Height);
@@ -161,7 +142,29 @@ namespace Microsoft.Xna.Framework.Content.Pipeline.Graphics
                 return true;
             }
 
-            // No other support for copying from a DXT texture yet
+            if ((destinationFormat == SurfaceFormat.Vector4)
+                && format is SurfaceFormat.Dxt1 or SurfaceFormat.Dxt3 or SurfaceFormat.Dxt5)
+            {
+                CompressionFormat bcnFormat = default;
+                switch (format)
+                {
+                    case SurfaceFormat.Dxt1:
+                        bcnFormat = CompressionFormat.Bc1;
+                        break;
+                    case SurfaceFormat.Dxt3:
+                        bcnFormat = CompressionFormat.Bc2;
+                        break;
+                    case SurfaceFormat.Dxt5:
+                        bcnFormat = CompressionFormat.Bc3;
+                        break;
+                }
+
+                var pixelBitmapContent = BcnUtil.Decode(_bitmapData, bcnFormat, Width, Height);
+                destinationBitmap.SetPixelData(pixelBitmapContent.GetPixelData());
+                return true;
+            }
+
+            // Unsupported SurfaceFormat(s) for bitmap copying
             return false;
         }
     }

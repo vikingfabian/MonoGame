@@ -3,10 +3,12 @@
 // file 'LICENSE.txt', which is part of this source code package.
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using Microsoft.Xna.Framework.Content.Pipeline.Graphics;
 using Microsoft.Xna.Framework.Graphics;
 using MonoGame.Framework.Content;
+using MonoGame.Tool;
 
 namespace Microsoft.Xna.Framework.Content.Pipeline.Utilities;
 
@@ -49,13 +51,19 @@ internal struct BasisUFormat
     /// </summary>
     public bool nonUastcCompatible;
 
+    /// <summary>
+    /// When building certain codecs we need to specify a flag other than -uastc.
+    /// </summary>
+    public string encoderFlag;
+
     // Instead of constructing one of these yourself, please use one of the many predefined static class members.
-    private BasisUFormat(int code, string name, bool isLinearColorSpace=false, bool nonUastcCompatible=false)
+    private BasisUFormat(int code, string name, bool isLinearColorSpace = false, bool nonUastcCompatible = false, string encoderFlag = "")
     {
         this.code = code;
         this.name = name;
         this.isLinearColorSpace = isLinearColorSpace;
         this.nonUastcCompatible = nonUastcCompatible;
+        this.encoderFlag = encoderFlag;
     }
 
     public override string ToString()
@@ -65,13 +73,68 @@ internal struct BasisUFormat
 
 
     /// <summary>
-    /// <see cref="SurfaceFormat.ASTC_4x4"/>
+    /// <see cref="SurfaceFormat.Astc4X4Rgba"/>
     /// // Opaque+alpha, ASTC 4x4, alpha channel will be opaque for opaque .basis files. Transcoder uses RGB/RGBA/L/LA modes, void extent, and up to two ([0,47] and [0,255]) endpoint precisions.
     /// </summary>
     public static readonly BasisUFormat Astc_4x4_Rgba = new BasisUFormat(
         code: 10,
         name: "cTFASTC_4x4_RGBA",
         isLinearColorSpace: true
+    );
+
+    /// <summary>
+    /// <see cref="SurfaceFormat.Astc5X5Rgba"/>
+    /// // Opaque+alpha, ASTC 5x5, alpha channel will be opaque for opaque .basis files. Transcoder uses RGB/RGBA/L/LA modes, void extent, and up to two ([0,47] and [0,255]) endpoint precisions.
+    /// </summary>
+    public static readonly BasisUFormat Astc_5x5_Rgba = new BasisUFormat(
+        code: 29,
+        name: "cTFASTC_5x5_RGBA",
+        isLinearColorSpace: true,
+        encoderFlag: "-xuastc_ldr_5x5"
+    );
+
+    /// <summary>
+    /// <see cref="SurfaceFormat.Astc6X6Rgba"/>
+    /// // Opaque+alpha, ASTC 6x6, alpha channel will be opaque for opaque .basis files. Transcoder uses RGB/RGBA/L/LA modes, void extent, and up to two ([0,47] and [0,255]) endpoint precisions.
+    /// </summary>
+    public static readonly BasisUFormat Astc_6x6_Rgba = new BasisUFormat(
+        code: 31,
+        name: "cTFASTC_6x6_RGBA",
+        isLinearColorSpace: true,
+         encoderFlag: "-xuastc_ldr_6x6"
+    );
+
+    /// <summary>
+    /// <see cref="SurfaceFormat.Astc8X8Rgba"/>
+    /// // Opaque+alpha, ASTC 8x8, alpha channel will be opaque for opaque .basis files. Transcoder uses RGB/RGBA/L/LA modes, void extent, and up to two ([0,47] and [0,255]) endpoint precisions.
+    /// </summary>
+    public static readonly BasisUFormat Astc_8x8_Rgba = new BasisUFormat(
+        code: 36,
+        name: "cTFASTC_8x8_RGBA",
+        isLinearColorSpace: true,
+         encoderFlag: "-xuastc_ldr_8x8"
+    );
+
+    /// <summary>
+    /// <see cref="SurfaceFormat.Astc10X10Rgba"/>
+    /// // Opaque+alpha, ASTC 10x10, alpha channel will be opaque for opaque .basis files. Transcoder uses RGB/RGBA/L/LA modes, void extent, and up to two ([0,47] and [0,255]) endpoint precisions.
+    /// </summary>
+    public static readonly BasisUFormat Astc_10x10_Rgba = new BasisUFormat(
+        code: 38,
+        name: "cTFASTC_10x10_RGBA",
+        isLinearColorSpace: true,
+         encoderFlag: "-xuastc_ldr_10x10"
+    );
+
+    /// <summary>
+    /// <see cref="SurfaceFormat.Astc12X12Rgba"/>
+    /// // Opaque+alpha, ASTC 12x12, alpha channel will be opaque for opaque .basis files. Transcoder uses RGB/RGBA/L/LA modes, void extent, and up to two ([0,47] and [0,255]) endpoint precisions.
+    /// </summary>
+    public static readonly BasisUFormat Astc_12x12_Rgba = new BasisUFormat(
+        code: 40,
+        name: "cTFASTC_12x12_RGBA",
+        isLinearColorSpace: true,
+         encoderFlag: "-xuastc_ldr_12x12"
     );
 
     /// <summary>
@@ -204,16 +267,16 @@ internal static class BasisU
     /// so the only way to control the output is to control the working dir.
     /// </param>
     /// <returns>The exit code for the basisu process. </returns>
-    public static int Run(string args, out string stdOut, out string stdErr, string stdIn=null, string workingDirectory=null)
+    public static int Run(string args, out string stdOut, out string stdErr, string? stdIn = null, string? workingDirectory = null)
     {
-        return ExternalTool.RunDotnetTool(ExternalTool.BasisU, args, out stdOut, out stdErr, stdIn, workingDirectory);
+        return Basisu.Run(args, out stdOut, out stdErr, stdIn, workingDirectory);
     }
 
     /// <summary>
     /// <para>
     ///     Convert a <see cref="SurfaceFormat"/> into a <see cref="BasisUFormat"/>.
     ///     Not all surface formats are supported. If the given format is not supported,
-    ///     then this method returns false, and the <see cref="error"/> out param will
+    ///     then this method returns false, and the <paramref name="error"/> out param will
     ///     include an explanation of why the format isn't supported.
     /// </para>
     /// <para>
@@ -221,12 +284,12 @@ internal static class BasisU
     ///     https://github.com/BinomialLLC/basis_universal/blob/master/transcoder/basisu_transcoder.h#L49
     /// </para>
     /// </summary>
-    /// <param name="format"></param>
-    /// <param name="basisUFormat"></param>
-    /// <param name="error"></param>
+    /// <param name="format">The format to retrieve the basis u format for.</param>
+    /// <param name="basisUFormat">The retrieved basis u format</param>
+    /// <param name="error">Error message (only relevant if the method returns <see langword="true" />).</param>
     /// <returns>
     ///     True if the <see cref="BasisUFormat"/> out param has been set.
-    ///     False otherwise, and the <see cref="error"/> out param will include an error message.
+    ///     False otherwise, and the <paramref name="error"/> out param will include an error message.
     /// </returns>
     public static bool TryGetBasisUFormat(SurfaceFormat format, out BasisUFormat basisUFormat, out string error)
     {
@@ -234,9 +297,34 @@ internal static class BasisU
         error = "";
         switch (format)
         {
-            // ASTC format
+            // ASTC 4x4 format
             case SurfaceFormat.Astc4X4Rgba:
                 basisUFormat = BasisUFormat.Astc_4x4_Rgba;
+                return true;
+
+            // ASTC 5x5 format
+            case SurfaceFormat.Astc5X5Rgba:
+                basisUFormat = BasisUFormat.Astc_5x5_Rgba;
+                return true;
+
+            // ASTC 6x6 format
+            case SurfaceFormat.Astc6X6Rgba:
+                basisUFormat = BasisUFormat.Astc_6x6_Rgba;
+                return true;
+
+            // ASTC 8x8 format
+            case SurfaceFormat.Astc8X8Rgba:
+                basisUFormat = BasisUFormat.Astc_8x8_Rgba;
+                return true;
+
+            // ASTC 10x10 format
+            case SurfaceFormat.Astc10X10Rgba:
+                basisUFormat = BasisUFormat.Astc_10x10_Rgba;
+                return true;
+
+            // ASTC 12x12 format
+            case SurfaceFormat.Astc12X12Rgba:
+                basisUFormat = BasisUFormat.Astc_12x12_Rgba;
                 return true;
 
             // ATC formats
@@ -352,7 +440,7 @@ internal static class BasisU
         BitmapContent sourceBitmap,
         SurfaceFormat format,
         out byte[] encodedBytes,
-        out string failureMessage)
+        out string? failureMessage)
     {
         failureMessage = null;
         encodedBytes = Array.Empty<byte>();
@@ -360,9 +448,9 @@ internal static class BasisU
 
         // these files will likely be created during this method, and should be
         //  deleted before exiting the function.
-        string pngFileName = null;
-        string intermediateFileName = null;
-        string ktxFileName = null;
+        string? pngFileName = null;
+        string? intermediateFileName = null;
+        string? ktxFileName = null;
 
         try
         {
@@ -420,7 +508,7 @@ internal static class BasisU
         string basisFileName,
         BasisUFormat basisUFormat,
         IContentContext context,
-        out string outputKtxFileName,
+        [MaybeNullWhen(false)] out string outputKtxFileName,
         out string error
     )
     {
@@ -457,7 +545,7 @@ internal static class BasisU
 
         // move backwards through the lines because the output we are looking for
         //  should be at the end of the output
-        const string logPrefix = "Wrote KTX file \"";
+        const string logPrefix = "Wrote .KTX file \"";
         const string logSuffix = "\"";
         for (var i = lines.Length - 1; i >= 0; i--)
         {
@@ -488,7 +576,7 @@ internal static class BasisU
         out string stdErr)
     {
         var absImageFileName = Path.GetFullPath(imageFileName);
-        var uastcFlag = format.nonUastcCompatible ? "": "-uastc";
+        var uastcFlag = format.encoderFlag ?? (format.nonUastcCompatible ? "" : "-uastc");
         var argStr = $"-file \"{absImageFileName}\" {uastcFlag} -ktx2 -output_file \"{intermediateFileName}\"";
         var exitCode = Run(
             args: argStr,

@@ -1,11 +1,12 @@
-// MonoGame - Copyright (C) The MonoGame Team
+// MonoGame - Copyright (C) MonoGame Foundation, Inc
 // This file is subject to the terms and conditions defined in
 // file 'LICENSE.txt', which is part of this source code package.
 
+using MonoGame.Framework.Utilities;
+using MonoGame.Interop;
 using System;
 using System.Collections.Generic;
-using MonoGame.Interop;
-using MonoGame.Framework.Utilities;
+using System.Runtime.InteropServices;
 
 
 namespace Microsoft.Xna.Framework.Graphics;
@@ -24,6 +25,7 @@ public partial class GraphicsDevice
     private DynamicIndexBuffer _userIndexBuffer32;
 
     private unsafe readonly MGG_Texture*[] _curRenderTargets = new MGG_Texture*[4];
+    private readonly int[] _currentRenderTargetArraySlices = new int[4];
 
     internal static int ShaderProfile
     {
@@ -48,21 +50,35 @@ public partial class GraphicsDevice
 
     private unsafe void PlatformInitialize()
     {
+        PresentationParameters.MultiSampleCount =
+                GetClampedMultisampleCount(PresentationParameters.BackBufferFormat, PresentationParameters.MultiSampleCount);
+
         MGG.GraphicsDevice_ResizeSwapchain(
                 Handle,
                 PresentationParameters.DeviceWindowHandle,
                 PresentationParameters.BackBufferWidth,
                 PresentationParameters.BackBufferHeight,
                 PresentationParameters.BackBufferFormat,
-                PresentationParameters.DepthStencilFormat);
+                PresentationParameters.DepthStencilFormat,
+                PresentationParameters.MultiSampleCount,
+                PresentationParameters.PresentationInterval.GetSyncInterval());
 
         // Setup the default texture.
         DefaultTexture = new Texture2D(this, 2, 2);
         DefaultTexture.SetData(new[] { Color.Black, Color.Black, Color.Black, Color.Black });
     }
 
+    internal int PlatformGetMaxMultiSampleCount(SurfaceFormat format)
+    {
+        return 4;
+    }
+
     private unsafe void OnPresentationChanged()
     {
+        // Clamp MultiSampleCount
+        PresentationParameters.MultiSampleCount =
+                GetClampedMultisampleCount(PresentationParameters.BackBufferFormat, PresentationParameters.MultiSampleCount);
+
         // Finish any frame that is currently rendering.
         if (_currentFrame > -1)
         {
@@ -77,7 +93,9 @@ public partial class GraphicsDevice
             PresentationParameters.BackBufferWidth,
             PresentationParameters.BackBufferHeight,
             PresentationParameters.BackBufferFormat,
-            PresentationParameters.DepthStencilFormat);
+            PresentationParameters.DepthStencilFormat,
+            PresentationParameters.MultiSampleCount,
+            PresentationParameters.PresentationInterval.GetSyncInterval());
 
         _viewport = new Viewport(
             0,
@@ -86,6 +104,12 @@ public partial class GraphicsDevice
             PresentationParameters.BackBufferHeight,
             _viewport.MinDepth,
             _viewport.MaxDepth);
+
+        _scissorRectangle = new Rectangle(
+            0,
+            0,
+            PresentationParameters.BackBufferWidth,
+            PresentationParameters.BackBufferHeight);
 
         // Begin a new frame it if was previously rendering.
         if (_currentFrame > -1)
@@ -116,6 +140,15 @@ public partial class GraphicsDevice
         Textures.Dirty();
         SamplerStates.Dirty();
 
+        MGG.GraphicsDevice_SetViewport(
+            Handle,
+            _viewport.X,
+            _viewport.Y,
+            _viewport.Width,
+            _viewport.Height,
+            _viewport.MinDepth,
+            _viewport.MaxDepth);
+
         PlatformApplyDefaultRenderTarget();
     }
 
@@ -129,6 +162,24 @@ public partial class GraphicsDevice
 
     private unsafe void PlatformDispose()
     {
+        foreach (var vb in _userVertexBuffers.Values)
+            vb.Dispose();
+        _userVertexBuffers.Clear();
+
+        if (_userIndexBuffer16 != null)
+        {
+            _userIndexBuffer16.Dispose();
+            _userIndexBuffer16 = null;
+        }
+
+        if (_userIndexBuffer32 != null)
+        {
+            _userIndexBuffer32.Dispose();
+            _userIndexBuffer32 = null;
+        }
+
+        DefaultTexture.Dispose();
+
         if (Handle != null)
         {
             MGG.GraphicsDevice_Destroy(Handle);
@@ -164,12 +215,26 @@ public partial class GraphicsDevice
     {
         BeginFrame();
 
-        MGG.GraphicsDevice_SetRenderTargets(Handle, null, 0);
+        _viewport = new Viewport(
+            0,
+            0,
+            PresentationParameters.BackBufferWidth,
+            PresentationParameters.BackBufferHeight,
+            _viewport.MinDepth,
+            _viewport.MaxDepth);
+
+        _scissorRectangle = new Rectangle(
+            0,
+            0,
+            PresentationParameters.BackBufferWidth,
+            PresentationParameters.BackBufferHeight);
+
+        MGG.GraphicsDevice_SetRenderTargets(Handle, null, null, 0);
     }
 
-    private void PlatformResolveRenderTargets()
+    private unsafe void PlatformResolveRenderTargets()
     {
-        // Resolving MSAA render targets should be done here.
+        MGG.GraphicsDevice_ResolveRenderTargets(Handle);
     }
 
     private unsafe IRenderTarget PlatformApplyRenderTargets()
@@ -178,19 +243,21 @@ public partial class GraphicsDevice
 
         Array.Clear(_curRenderTargets, 0, 4);
 
-        RenderTarget2D first = null;
+        IRenderTarget first = null;
 
         for (var i = 0; i < _currentRenderTargetCount; i++)
         {
             var binding = _currentRenderTargetBindings[i];
-            var target = binding.RenderTarget as RenderTarget2D;
+            var target = binding.RenderTarget;
             _curRenderTargets[i] = target.Handle;
+            _currentRenderTargetArraySlices[i] = binding.ArraySlice;
             if (i == 0)
-                first = target;
+                first = target as IRenderTarget;
         }
 
         fixed (MGG_Texture** targets = _curRenderTargets)
-            MGG.GraphicsDevice_SetRenderTargets(Handle, targets, _currentRenderTargetCount);
+        fixed (int* arraySlices = _currentRenderTargetArraySlices)
+            MGG.GraphicsDevice_SetRenderTargets(Handle, targets, arraySlices, _currentRenderTargetCount);
         
         return first;
     }
@@ -238,17 +305,38 @@ public partial class GraphicsDevice
         if (_pixelShader == null)
             throw new InvalidOperationException("A pixel shader must be set!");
 
+        bool layoutChanged = false;
+
+        // Change the vertex shader first as it can cause changes
+        // to other states that the shader depends on.
+        if (_vertexShaderDirty)
+        {
+            MGG.GraphicsDevice_SetShader(Handle, ShaderStage.Vertex, _vertexShader.Handle);
+            _vertexBuffersDirty = true;
+            unchecked { _graphicsMetrics._vertexShaderCount++; }
+        }
+
+        if (_pixelShaderDirty)
+        {
+            MGG.GraphicsDevice_SetShader(Handle, ShaderStage.Pixel, _pixelShader.Handle);
+            unchecked { _graphicsMetrics._pixelShaderCount++; }
+        }
+
         if (_indexBufferDirty)
         {
             if (_indexBuffer != null)
                 MGG.GraphicsDevice_SetIndexBuffer(Handle, _indexBuffer.IndexElementSize, _indexBuffer.Handle);
-            _indexBufferDirty = false;
         }
 
-        if (_vertexBuffersDirty && _vertexBuffers.Count > 0)
+        if (layoutChanged || _vertexBuffersDirty)
         {
-            var numBuffers = _vertexBuffers.Count;
-            for (var slot = 0; slot < numBuffers; slot++)
+            var layout = _vertexShader.GetOrCreateLayout(_vertexBuffers);
+            MGG.GraphicsDevice_SetInputLayout(Handle, layout);
+        }
+
+        if (_vertexBuffersDirty)
+        {
+            for (var slot = 0; slot < _vertexBuffers.Count; slot++)
             {
                 var vertexBufferBinding = _vertexBuffers.Get(slot);
                 var buffer = vertexBufferBinding.VertexBuffer;
@@ -256,27 +344,6 @@ public partial class GraphicsDevice
                 MGG.GraphicsDevice_SetVertexBuffer(Handle, slot, buffer.Handle, vertexBufferBinding.VertexOffset);
             }
         }
-
-        if (_vertexShaderDirty)
-        {
-            MGG.GraphicsDevice_SetShader(Handle, ShaderStage.Vertex, _vertexShader.Handle);
-            unchecked { _graphicsMetrics._vertexShaderCount++; }
-        }
-
-        if (_vertexShaderDirty || _vertexBuffersDirty)
-        {
-            var layout = _vertexShader.GetOrCreateLayout(_vertexBuffers);
-            MGG.GraphicsDevice_SetInputLayout(Handle, layout);
-            _vertexShaderDirty = _vertexBuffersDirty = false;
-        }
-
-        if (_pixelShaderDirty)
-        {
-            MGG.GraphicsDevice_SetShader(Handle, ShaderStage.Pixel, _pixelShader.Handle);
-            _pixelShaderDirty = false;
-            unchecked { _graphicsMetrics._pixelShaderCount++; }
-        }
-
         _vertexConstantBuffers.SetConstantBuffers(this);
         _pixelConstantBuffers.SetConstantBuffers(this);
 
@@ -285,6 +352,11 @@ public partial class GraphicsDevice
 
         Textures.SetTextures(this);
         SamplerStates.PlatformSetSamplers(this);
+
+        _indexBufferDirty = false;
+        _vertexBuffersDirty = false;
+        _vertexShaderDirty = false;
+        _pixelShaderDirty = false;
     }
 
     private int SetUserVertexBuffer<T>(T[] vertexData, int vertexOffset, int vertexCount, VertexDeclaration vertexDecl)
@@ -377,6 +449,10 @@ public partial class GraphicsDevice
     private unsafe void PlatformDrawIndexedPrimitives(PrimitiveType primitiveType, int baseVertex, int startIndex, int primitiveCount)
     {
         ApplyState(true);
+        if (baseVertex < 0)
+            baseVertex = 0;
+        if (startIndex < 0)
+            startIndex = 0;
 
         MGG.GraphicsDevice_DrawIndexed(Handle, primitiveType, primitiveCount, startIndex, baseVertex);
     }
@@ -392,6 +468,8 @@ public partial class GraphicsDevice
     private unsafe void PlatformDrawPrimitives(PrimitiveType primitiveType, int vertexStart, int vertexCount)
     {
         ApplyState(true);
+        if (vertexStart < 0)
+            vertexStart = 0;
 
         MGG.GraphicsDevice_Draw(Handle, primitiveType, vertexStart, vertexCount);
     }
@@ -423,12 +501,36 @@ public partial class GraphicsDevice
         MGG.GraphicsDevice_DrawIndexedInstanced(Handle, primitiveType, primitiveCount, startIndex, baseVertex, instanceCount);
     }
 
-    private void PlatformGetBackBufferData<T>(Rectangle? rect, T[] data, int startIndex, int count) where T : struct
+    private unsafe void PlatformGetBackBufferData<T>(Rectangle? rect, T[] data, int startIndex, int count) where T : struct
     {
-        throw new NotImplementedException();
+        var rectangle = rect ?? new Rectangle(0, 0, PresentationParameters.BackBufferWidth, PresentationParameters.BackBufferHeight);
+        var tSize = Marshal.SizeOf<T>();
+        GCHandle dataHandle = default;
+        try
+        {
+            dataHandle = GCHandle.Alloc(
+                data, GCHandleType.Pinned);
+            IntPtr pData = dataHandle.AddrOfPinnedObject();
+            MGG.GraphicsDevice_GetBackBufferData(
+                Handle,
+                rectangle.X,
+                rectangle.Y,
+                rectangle.Width,
+                rectangle.Height,
+                pData + startIndex * tSize,
+                count,
+                tSize);
+        }
+        finally
+        {
+            if (dataHandle.IsAllocated)
+            {
+                dataHandle.Free();
+            }
+        }
     }
 
-    private static Rectangle PlatformGetTitleSafeArea(int x, int y, int width, int height)
+    private static unsafe Rectangle PlatformGetTitleSafeArea(int x, int y, int width, int height)
     {
         MGG.GraphicsDevice_GetTitleSafeArea(ref x, ref y, ref width, ref height);
 
